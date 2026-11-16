@@ -1,0 +1,7 @@
+*.xlsx
+*.xls
+*.xlsm
+~$*
+.DS_Store
+node_modules/
+__pycache__/

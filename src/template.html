@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex,nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INSII focal contacts</title>
+<style>/*MAPLIBRE_CSS*/</style>
+<style>
+:root{--blue:#0C9CD8;--green:#90BB23;--lblue:#CEEBF7;--grey:#F2F2F2;--text:#1d1d1d}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font-family:"Segoe UI","Open Sans",Arial,sans-serif;color:var(--text);background:#fff}
+.app{display:grid;grid-template-columns:300px 1fr;grid-template-rows:auto 1fr;height:100%}
+header{grid-column:1/3;display:flex;align-items:center;justify-content:space-between;padding:10px 18px;border-bottom:3px solid var(--blue)}
+header h1{margin:0;font-size:20px;font-weight:600;color:var(--blue)}
+header p{margin:2px 0 0;font-size:13px;color:#555}
+aside{background:var(--grey);padding:16px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+label{font-size:13px;font-weight:600;color:var(--blue)}
+select{width:100%;margin-top:6px;padding:8px;font-size:14px;border:1px solid #bbb;border-radius:3px;background:#fff}
+.card{background:#fff;border-radius:4px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.card small{display:block;font-size:12px;color:#666;margin-bottom:6px}
+.card div{font-size:18px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.card .none{color:#888;font-weight:400;font-style:italic}
+button{padding:8px;font-size:13px;border:1px solid var(--blue);background:#fff;color:var(--blue);border-radius:3px;cursor:pointer}
+button:hover{background:var(--lblue)}
+.note{font-size:10.5px;color:#666;line-height:1.35;margin-top:auto}.note p{margin:0 0 5px}
+#mapwrap{position:relative;min-height:300px}
+#map{position:absolute;inset:0}
+#status{position:absolute;left:8px;bottom:26px;z-index:4;max-width:60%;font-size:11px;color:#a00;background:rgba(255,255,255,.9);padding:3px 6px;border-radius:3px;display:none;pointer-events:none}
+#err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#fff;color:#a00;font-size:14px;text-align:center;padding:20px;z-index:5}
+.maplibregl-popup-content{padding:12px 14px;font-size:13px;min-width:190px}
+.maplibregl-popup-content b{display:block;font-size:11px;font-weight:400;color:#666;margin-top:6px}
+.maplibregl-popup-content b:first-child{margin-top:0}
+.maplibregl-popup-content span{font-size:14px;font-weight:600}
+@media(max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}header{grid-column:1}aside{flex-direction:row;flex-wrap:wrap}aside>*{flex:1 1 200px}}
+</style>
+</head>
+<body>
+<div class="app">
+ <header><div><h1>INSII focal contacts</h1><p>Select a country, or click a dot on the map, to check the registered INSII institution and contact.</p></div></header>
+ <aside>
+  <div><label for="country">Country</label><select id="country"></select></div>
+  <div class="card"><small>Selected INSII Institution</small><div id="inst" class="none">Select a country</div></div>
+  <div class="card"><small>Selected INSII Contact</small><div id="cont" class="none">Select a country</div></div>
+  <button id="reset" type="button">World view</button>
+  <div class="note">
+ <p>The boundaries and names shown and the designations used on this map do not imply official endorsement or acceptance by the United Nations. Final boundary between the Republic of Sudan and the Republic of South Sudan has not yet been determined.</p>
+ <p>* Non-Self Governing Territories</p>
+ <p>** Dotted line represents approximately the Line of Control in Jammu and Kashmir agreed upon by India and Pakistan. The final status of Jammu and Kashmir has not yet been agreed upon by the parties.</p>
+ <p>*** A dispute exists between the Governments of Argentina and the United Kingdom of Great Britain and Northern Ireland concerning sovereignty over the Falkland Islands (Malvinas).</p>
+ <p>Basemap: UN ClearMap.</p>
+</div>
+ </aside>
+ <div id="mapwrap"><div id="map"></div><div id="status"></div><div id="err"><div><b>The basemap could not be loaded.</b><br>Open this file directly in Chrome or Edge (double-click it) with an internet connection. Preview panes and some corporate networks block the request.<br><br><small id="errdetail"></small></div></div></div>
+</div>
+<script>/*MAPLIBRE_JS*/</script>
+<script>
+const DATA = /*DATA*/;
+const BBOX = /*BBOX*/;
+const BASE = "https://pro-ags2.dfs.un.org/arcgis/rest/services/Hosted/Clear_Map/VectorTileServer";
+const byIso = Object.fromEntries(DATA.map(d=>[d.iso,d]));
+const $ = id => document.getElementById(id);
+
+// dropdown, grouped by region
+const sel = $('country');
+sel.add(new Option('All countries', ''));
+const regions = [...new Set(DATA.map(d=>d.region||'Other'))].sort();
+for (const r of regions){
+  const g = document.createElement('optgroup'); g.label = r;
+  DATA.filter(d=>(d.region||'Other')===r).sort((a,b)=>a.country.localeCompare(b.country))
+      .forEach(d=>g.appendChild(new Option(d.country, d.iso)));
+  sel.appendChild(g);
+}
+
+function setCard(el, text){
+  el.textContent = text || 'Not specified';
+  el.className = text ? '' : 'none';
+}
+
+let map, popup;
+function show(iso, opts={}){
+  const d = byIso[iso];
+  sel.value = d ? iso : '';
+  if (!d){
+    setCard($('inst'), null); $('inst').textContent='Select a country'; 
+    setCard($('cont'), null); $('cont').textContent='Select a country';
+    if (popup) popup.remove();
+    if (map.getSource('sel')) map.getSource('sel').setData({type:'FeatureCollection',features:[]});
+    map.fitBounds([[-170,-55],[175,75]],{padding:10,duration:800});
+    history.replaceState(null,'','#'); return;
+  }
+  setCard($('inst'), d.institution); setCard($('cont'), d.contact);
+  const f = {type:'Feature',geometry:{type:'Point',coordinates:[d.lon,d.lat]},properties:{}};
+  map.getSource('sel').setData({type:'FeatureCollection',features:[f]});
+  if (!opts.noMove){
+    const b = BBOX[iso];
+    if (b) map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:60,maxZoom:5.5,duration:900});
+    else map.flyTo({center:[d.lon,d.lat],zoom:4,duration:900});
+  }
+  openPopup(d);
+  history.replaceState(null,'','#'+iso);
+}
+
+function openPopup(d){
+  if (popup) popup.remove();
+  const box = document.createElement('div');
+  const add = (label,val)=>{const b=document.createElement('b');b.textContent=label;const s=document.createElement('span');s.textContent=val||'Not specified';box.append(b,s);};
+  add('INSII Institution', d.institution); add('INSII Contact', d.contact);
+  popup = new maplibregl.Popup({offset:12,closeButton:true,maxWidth:'280px'}).setLngLat([d.lon,d.lat]).setDOMContent(box).addTo(map);
+}
+
+sel.addEventListener('change',()=>show(sel.value));
+$('reset').addEventListener('click',()=>show(''));
+
+async function init(){
+  let style;
+  try{
+    style = await (await fetch(BASE+'/resources/styles/root.json')).json();
+  }catch(e){ $('errdetail').textContent='Detail: '+(e&&e.message?e.message:e)+' | page origin: '+location.origin; $('err').style.display='flex'; return; }
+  // resolve the relative URLs in the ClearMap style to explicit tile endpoints
+  style.sprite = BASE+'/resources/sprites/sprite';
+  style.glyphs = BASE+'/resources/fonts/{fontstack}/{range}.pbf';
+  style.sources.esri = {type:'vector', tiles:[BASE+'/tile/{z}/{y}/{x}.pbf'], minzoom:0, maxzoom:7, attribution:'UN ClearMap (UN_CLEARMAP_VT)'};
+  map = new maplibregl.Map({container:'map', style, bounds:[[-170,-55],[175,75]], fitBoundsOptions:{padding:10}, maxZoom:5.85, minZoom:1, attributionControl:{compact:true}, dragRotate:false});
+  map.touchZoomRotate.disableRotation();
+  map.addControl(new maplibregl.NavigationControl({showCompass:false}),'top-right');
+  let shown=false;
+  map.on('error',e=>{ const m=String(e&&e.error&&e.error.message||e); console.warn(m); if(!shown){shown=true;const s=$('status');s.textContent='Basemap notice: '+m.slice(0,160);s.style.display='block';} });
+  map.on('load',()=>{
+    map.addSource('contacts',{type:'geojson',data:{type:'FeatureCollection',features:DATA.map(d=>({type:'Feature',geometry:{type:'Point',coordinates:[d.lon,d.lat]},properties:{iso:d.iso}}))}});
+    map.addSource('sel',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+    map.addLayer({id:'dots',type:'circle',source:'contacts',paint:{'circle-radius':['interpolate',['linear'],['zoom'],1,4,6,8],'circle-color':'#0C9CD8','circle-stroke-color':'#fff','circle-stroke-width':1.5}});
+    map.addLayer({id:'dot-sel',type:'circle',source:'sel',paint:{'circle-radius':['interpolate',['linear'],['zoom'],1,8,6,13],'circle-color':'#90BB23','circle-stroke-color':'#fff','circle-stroke-width':2}});
+    map.on('click','dots',e=>{ const iso=e.features[0].properties.iso; show(iso); });
+    map.on('mouseenter','dots',()=>map.getCanvas().style.cursor='pointer');
+    map.on('mouseleave','dots',()=>map.getCanvas().style.cursor='');
+    const h = location.hash.replace('#','').toUpperCase();
+    if (byIso[h]) show(h);
+  });
+}
+init();
+</script>
+</body>
+</html>
